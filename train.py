@@ -105,6 +105,24 @@ def prepare_batch_data(points_list, boxes_list, device):
     }
 
 
+def prepare_targets(boxes_list, device, heatmap_size=(250, 469), feature_stride=8, num_classes=3):
+    heatmap_list, regression_list, mask_list = [], [], []
+    for boxes in boxes_list:
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32, device=device)
+        heatmap, regression, mask = generate_heatmap_target(
+            boxes_tensor, heatmap_size, feature_stride, num_classes
+        )
+        heatmap_list.append(heatmap.unsqueeze(0))
+        regression_list.append(regression.unsqueeze(0))
+        mask_list.append(mask.unsqueeze(0))
+    
+    return (
+        torch.cat(heatmap_list, dim=0),
+        torch.cat(regression_list, dim=0),
+        torch.cat(mask_list, dim=0)
+    )
+
+
 def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler):
     model.train()
     # ... 损失统计变量 ...
