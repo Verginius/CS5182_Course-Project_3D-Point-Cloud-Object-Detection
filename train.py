@@ -13,6 +13,7 @@ from models.loss import CenterLoss, generate_heatmap_target
 from datasets.kitti import KITTIDataset, kitti_collate_fn
 from datasets.dali_kitti import KITTIDALIPipeline, GTDataLoader
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
+from nvidia.dali.plugin.base_iterator import LastBatchPolicy
 from config import DATA_CONFIG, TRAIN_CONFIG
 
 
@@ -192,7 +193,7 @@ def main():
         output_map=["points", "label_idx"], 
         size=len(dali_pipe.file_list),
         auto_reset=True,
-        last_batch_policy="PARTIAL"
+        last_batch_policy=LastBatchPolicy.PARTIAL
     )
 
     print("Loading KITTI dataset...")
