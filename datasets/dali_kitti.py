@@ -36,9 +36,10 @@ class KITTIDALIPipeline(Pipeline):
         return points.gpu(), label_idx.gpu()
 
 class GTDataLoader:
-    def __init__(self, dali_pipe, dali_iter, db_info_path, label_root, sample_groups):
+    def __init__(self, dali_pipe, dali_iter, db_info_path, label_root, sample_groups, data_root):
         self.dali_pipe = dali_pipe
         self.dali_iter = dali_iter
+        self.data_root = data_root
         with open(db_info_path, 'rb') as f:
             self.db_infos = pickle.load(f)
         
@@ -81,8 +82,10 @@ class GTDataLoader:
         for cls, count in self.sample_groups.items():
             choices = np.random.choice(self.db_infos[cls], count)
             for info in choices:
-                obj_p = np.fromfile(info['path'], dtype=np.float32).reshape(-1, 4)
+                # 拼接完整路径
+                file_path = os.path.join(self.data_root, info['path']) if not os.path.isabs(info['path']) else info['path']
+                obj_p = np.fromfile(file_path, dtype=np.float32).reshape(-1, 4)
                 # 因为是相对坐标，直接加上它原始的 box 中心坐标即可复原到场景中
                 obj_p[:, :3] += info['box3d_lidar'][:3] 
                 all_sampled_pts.append(obj_p)
-        return np.concatenate(all_sampled_pts, axis=0)    
+        return np.concatenate(all_sampled_pts, axis=0)

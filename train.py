@@ -197,13 +197,15 @@ def main():
     )
 
     print("Loading KITTI dataset...")
+    print("Loading KITTI dataset...")
     # 3. 接入你的 GT Sampling 包装器 (CPU 逻辑增强)
     train_loader = GTDataLoader(
         dali_pipe=dali_pipe,
         dali_iter=dali_iter,
         db_info_path=os.path.join(DATA_CONFIG['dataset_path'], 'kitti_dbinfos_train.pkl'),
         label_root=os.path.join(DATA_CONFIG['dataset_path'], 'training/label_2'),
-        sample_groups={'Car': 15, 'Pedestrian': 10, 'Cyclist': 10}
+        sample_groups={'Car': 15, 'Pedestrian': 10, 'Cyclist': 10},
+        data_root=DATA_CONFIG['dataset_path']
     )
     
     # Create checkpoint dir
