@@ -1,0 +1,21 @@
+name: pointcloud_5090
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - default
+dependencies:
+  - python=3.10
+  - pip
+  - cudatoolkit=12.6
+  - pip:
+    - torch==2.9.0
+    - torchvision==0.24.0
+    - torchaudio==2.9.0
+    - spconv-cu126
+    - nvidia-dali-cuda126
+    - scipy
+    - scikit-learn
+    - matplotlib
+    - plyfile
+    - open3d
