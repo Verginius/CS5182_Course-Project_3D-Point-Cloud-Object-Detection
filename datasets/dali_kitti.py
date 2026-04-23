@@ -44,48 +44,110 @@ class GTDataLoader:
             self.db_infos = pickle.load(f)
         
         self.label_root = label_root
+        self.calib_root = os.path.join(data_root, 'training/calib')
         self.sample_groups = sample_groups # 例如 {'Car': 15, 'Pedestrian': 10}
         # 获取文件名列表，用于索引回找
         self.file_names = [os.path.basename(f).replace('.bin', '') for f in dali_pipe.file_list]
+        self.class_map = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
+
+    def _get_calib_matrix(self, calib_file):
+        with open(calib_file, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            if 'Tr_velo_to_cam' in line:
+                tr = np.array([float(x) for x in line.split()[1:]]).reshape(3, 4)
+                tr = np.concatenate([tr, [[0, 0, 0, 1]]], axis=0)
+                return tr
+        return None
+
+    def _box_cam_to_lidar(self, box_cam, tr_mat):
+        h, w, l, x, y, z, yaw = box_cam
+        p_cam = np.array([x, y - h/2, z, 1.0]).reshape(4, 1)
+        p_lidar = np.linalg.inv(tr_mat) @ p_cam
+        lidar_yaw = -yaw - np.pi / 2
+        while lidar_yaw > np.pi: lidar_yaw -= 2 * np.pi
+        while lidar_yaw < -np.pi: lidar_yaw += 2 * np.pi
+        # Return [x, y, z, w, l, h, yaw] to match what model expects
+        return np.array([p_lidar[0,0], p_lidar[1,0], p_lidar[2,0], w, l, h, lidar_yaw])
+
+    def _load_original_boxes(self, file_name):
+        label_file = os.path.join(self.label_root, f"{file_name}.txt")
+        calib_file = os.path.join(self.calib_root, f"{file_name}.txt")
+        if not os.path.exists(label_file) or not os.path.exists(calib_file):
+            return np.zeros((0, 8), dtype=np.float32)
+        
+        tr_mat = self._get_calib_matrix(calib_file)
+        boxes = []
+        with open(label_file, 'r') as f:
+            for line in f:
+                data = line.strip().split()
+                if len(data) < 15: continue
+                cls_type = data[0]
+                if cls_type not in self.class_map: continue
+                
+                box_cam = [float(x) for x in data[8:15]] # h, w, l, x, y, z, yaw
+                box_lidar = self._box_cam_to_lidar(box_cam, tr_mat)
+                class_id = self.class_map[cls_type]
+                
+                boxes.append(np.append(box_lidar, class_id))
+        
+        if len(boxes) == 0:
+            return np.zeros((0, 8), dtype=np.float32)
+        return np.array(boxes, dtype=np.float32)
 
     def __iter__(self):
         for data in self.dali_iter:
-            # data[0] 是 {'points': Tensor, 'label_idx': Tensor}
             points_batch = data[0]['points']
             idx_batch = data[0]['label_idx'].cpu().numpy().flatten()
             
             final_points_batch = []
+            final_boxes_batch = []
             
             for i in range(len(idx_batch)):
-                # 1. 获取当前帧的原始点云和文件名
                 pts = points_batch[i].cpu().numpy()
                 file_name = self.file_names[idx_batch[i]]
                 
-                # 2. 执行 GT Sampling 粘贴逻辑
-                sampled_pts = self.apply_gt_sampling(pts)
+                # 1. Load original boxes
+                orig_boxes = self._load_original_boxes(file_name)
                 
-                # 3. 最终统一 Pad/Slice 到 60,000 点，匹配 5090 优化需求
+                # 2. GT Sampling
+                sampled_pts, sampled_boxes = self.apply_gt_sampling(pts)
+                
+                # 3. Pad/Slice points
                 if len(sampled_pts) > 60000:
                     sampled_pts = sampled_pts[:60000]
                 else:
                     pad = np.zeros((60000 - len(sampled_pts), 4), dtype=np.float32)
                     sampled_pts = np.concatenate([sampled_pts, pad], axis=0)
                 
+                # 4. Combine boxes
+                all_boxes = np.concatenate([orig_boxes, sampled_boxes], axis=0) if len(sampled_boxes) > 0 else orig_boxes
+                
                 final_points_batch.append(sampled_pts)
+                final_boxes_batch.append(all_boxes)
             
-            yield np.array(final_points_batch) # 返回 [BS, 60000, 4]
+            yield {
+                'points': final_points_batch, 
+                'gt_boxes': final_boxes_batch
+            }
 
     def apply_gt_sampling(self, points):
-        # 这里的逻辑就是从 db_infos 随机选文件，np.fromfile 读取并 points += box_xyz
-        # ... 实现细节参考之前的相对坐标转换 ...
         all_sampled_pts = [points]
+        sampled_boxes = []
         for cls, count in self.sample_groups.items():
+            if len(self.db_infos[cls]) == 0: continue
             choices = np.random.choice(self.db_infos[cls], count)
             for info in choices:
-                # 拼接完整路径
                 file_path = os.path.join(self.data_root, info['path']) if not os.path.isabs(info['path']) else info['path']
+                if not os.path.exists(file_path): continue
                 obj_p = np.fromfile(file_path, dtype=np.float32).reshape(-1, 4)
-                # 因为是相对坐标，直接加上它原始的 box 中心坐标即可复原到场景中
                 obj_p[:, :3] += info['box3d_lidar'][:3] 
                 all_sampled_pts.append(obj_p)
-        return np.concatenate(all_sampled_pts, axis=0)
+                
+                # info['box3d_lidar'] is [x, y, z, l, w, h, yaw]
+                # We need [x, y, z, w, l, h, yaw, class_id]
+                b = info['box3d_lidar']
+                class_id = self.class_map[cls]
+                sampled_boxes.append([b[0], b[1], b[2], b[4], b[3], b[5], b[6], class_id])
+                
+        return np.concatenate(all_sampled_pts, axis=0), np.array(sampled_boxes, dtype=np.float32).reshape(-1, 8)
