@@ -17,16 +17,14 @@ class KITTIDALIPipeline(Pipeline):
             os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith(".bin")
         ])
 
-        self.input = fn.readers.file(
+    def define_graph(self):
+        # raw_bin: 点云数据, label_idx: DALI 内部的文件索引
+        raw_bin, label_idx = fn.readers.file(
             files=self.file_list,
-            random_shuffle=(split == "training"),
+            random_shuffle=(self.split == "training"),
             name="Reader",
             pad_last_batch=True # 保证 BS 恒定
         )
-
-    def define_graph(self):
-        # raw_bin: 点云数据, label_idx: DALI 内部的文件索引
-        raw_bin, label_idx = self.input(name="Reader")
         
         points = fn.reinterpret(raw_bin, dtype=types.FLOAT)
         points = fn.reshape(points, shape=[-1, 4])
