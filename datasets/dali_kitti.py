@@ -36,7 +36,8 @@ class KITTIDALIPipeline(Pipeline):
         return points.gpu(), label_idx.gpu()
 
 class GTDataLoader:
-    def __init__(self, dali_iter, db_info_path, label_root, sample_groups):
+    def __init__(self, dali_pipe, dali_iter, db_info_path, label_root, sample_groups):
+        self.dali_pipe = dali_pipe
         self.dali_iter = dali_iter
         with open(db_info_path, 'rb') as f:
             self.db_infos = pickle.load(f)
@@ -44,7 +45,7 @@ class GTDataLoader:
         self.label_root = label_root
         self.sample_groups = sample_groups # 例如 {'Car': 15, 'Pedestrian': 10}
         # 获取文件名列表，用于索引回找
-        self.file_names = [os.path.basename(f).replace('.bin', '') for f in dali_iter.pipelines[0].file_list]
+        self.file_names = [os.path.basename(f).replace('.bin', '') for f in dali_pipe.file_list]
 
     def __iter__(self):
         for data in self.dali_iter:
