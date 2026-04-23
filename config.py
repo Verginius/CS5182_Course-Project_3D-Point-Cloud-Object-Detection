@@ -52,7 +52,7 @@ TRAIN_CONFIG = {
 
 # Data Configuration (集成 DALI)
 DATA_CONFIG = {
-    'dataset_path': 'data/kitti',
+    'dataset_path': '/root/autodl-tmp/data',
     'num_workers': 8, # 5090 配合多核 CPU，建议加大
     'prefetch_size': 2,
     'max_points_limit': 60000, # 强制 DALI 采样 60,000 个点

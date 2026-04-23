@@ -118,7 +118,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler):
         
         # 3. 使用 AMP (自动混合精度) 充分发挥 5090 性能
         optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             preds = model['second'](batch_dict)
             bev_features = preds.get('features')
             
@@ -173,7 +173,7 @@ def main():
     
     # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'])    
-    scaler = torch.cuda.amp.GradScaler()  # AMP 训练的梯度缩放器
+    scaler = torch.amp.GradScaler('cuda')  # AMP 训练的梯度缩放器
 
     # 1. 创建 DALI 原始管线
     dali_pipe = KITTIDALIPipeline(
@@ -199,13 +199,10 @@ def main():
     # 3. 接入你的 GT Sampling 包装器 (CPU 逻辑增强)
     train_loader = GTDataLoader(
         dali_iter=dali_iter,
-        db_info_path='/root/autodl-tmp/data/kitti_dbinfos_train.pkl',
-        label_root='/root/autodl-tmp/data/training/label_2',
+        db_info_path=os.path.join(DATA_CONFIG['dataset_path'], 'kitti_dbinfos_train.pkl'),
+        label_root=os.path.join(DATA_CONFIG['dataset_path'], 'training/label_2'),
         sample_groups={'Car': 15, 'Pedestrian': 10, 'Cyclist': 10}
     )
-
-    # Data loader - use KITTI dataset
-    kitti_root = '/root/autodl-tmp/data'  # Extracted data root
     
     # Create checkpoint dir
     os.makedirs(config['training']['checkpoint_dir'], exist_ok=True)
