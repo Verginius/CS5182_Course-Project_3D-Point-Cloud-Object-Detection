@@ -163,11 +163,11 @@ def draw_gaussian(heatmap, center, radius):
     Draw a 2D Gaussian on heatmap
     """
     diameter = 2 * radius + 1
-    x = torch.arange(diameter, dtype=torch.float32, device=heatmap.device) - radius
-    y = torch.arange(diameter, dtype=torch.float32, device=heatmap.device) - radius
-    y, x = torch.meshgrid(y, x)
+    x_grid = torch.arange(diameter, dtype=torch.float32, device=heatmap.device) - radius
+    y_grid = torch.arange(diameter, dtype=torch.float32, device=heatmap.device) - radius
+    y_grid, x_grid = torch.meshgrid(y_grid, x_grid, indexing='ij')
     
-    gaussian = torch.exp(-(x**2 + y**2) / (2 * radius**2))
+    gaussian = torch.exp(-(x_grid**2 + y_grid**2) / (2 * radius**2))
     
     x, y = center
     
@@ -176,14 +176,14 @@ def draw_gaussian(heatmap, center, radius):
         x2, y2 = min(heatmap.shape[1], x + radius + 1), min(heatmap.shape[0], y + radius + 1)
         
         if x2 > x1 and y2 > y1:
-            gaussian_x1 = max(0, radius - x)
-            gaussian_y1 = max(0, radius - y)
-            gaussian_x2 = radius + 1 - max(0, x + radius + 1 - heatmap.shape[1])
-            gaussian_y2 = radius + 1 - max(0, y + radius + 1 - heatmap.shape[0])
+            gy1 = y1 - y + radius
+            gy2 = y2 - y + radius
+            gx1 = x1 - x + radius
+            gx2 = x2 - x + radius
             
             heatmap[y1:y2, x1:x2] = torch.maximum(
                 heatmap[y1:y2, x1:x2],
-                gaussian[gaussian_y1:gaussian_y2, gaussian_x1:gaussian_x2]
+                gaussian[gy1:gy2, gx1:gx2]
             )
     else:
         if 0 <= x < heatmap.shape[1] and 0 <= y < heatmap.shape[0]:
