@@ -39,9 +39,11 @@ class KITTIDataset(Dataset):
         if split == 'test':
             self.velodyne_dir = os.path.join(data_root, 'testing', 'velodyne')
             self.label_dir = None
+            self.calib_dir = None
         else:
             self.velodyne_dir = os.path.join(data_root, 'training', 'velodyne')
             self.label_dir = os.path.join(data_root, 'training', 'label_2')
+            self.calib_dir = os.path.join(data_root, 'training', 'calib')
         
         # Check and extract if needed
         self._maybe_extract()
@@ -104,9 +106,10 @@ class KITTIDataset(Dataset):
         
         # Load labels (only for train/val)
         boxes = np.zeros((0, 8), dtype=np.float32)  # [N, 8] with class_id
-        if self.label_dir is not None:
+        if self.label_dir is not None and self.calib_dir is not None:
             label_path = os.path.join(self.label_dir, f'{sample_id}.txt')
-            boxes = self._load_labels(label_path)
+            calib_path = os.path.join(self.calib_dir, f'{sample_id}.txt')
+            boxes = self._load_labels(label_path, calib_path)
         
         return {
             'points': points,
@@ -119,15 +122,39 @@ class KITTIDataset(Dataset):
         points = np.fromfile(path, dtype=np.float32).reshape(-1, 4)
         return points
     
-    def _load_labels(self, path: str) -> np.ndarray:
+    def _get_calib_matrix(self, calib_file: str):
+        """Extract Tr_velo_to_cam matrix from calibration file"""
+        with open(calib_file, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            if 'Tr_velo_to_cam' in line:
+                tr = np.array([float(x) for x in line.split()[1:]]).reshape(3, 4)
+                tr = np.concatenate([tr, [[0, 0, 0, 1]]], axis=0)
+                return tr
+        return None
+
+    def _box_cam_to_lidar(self, box_cam: List[float], tr_mat: np.ndarray) -> np.ndarray:
+        """Convert KITTI Camera bounding box to LiDAR coordinate system"""
+        h, w, l, x, y, z, yaw = box_cam
+        p_cam = np.array([x, y - h/2, z, 1.0]).reshape(4, 1)
+        p_lidar = np.linalg.inv(tr_mat) @ p_cam
+        lidar_yaw = -yaw - np.pi / 2
+        while lidar_yaw > np.pi: lidar_yaw -= 2 * np.pi
+        while lidar_yaw < -np.pi: lidar_yaw += 2 * np.pi
+        return np.array([p_lidar[0,0], p_lidar[1,0], p_lidar[2,0], w, l, h, lidar_yaw])
+
+    def _load_labels(self, path: str, calib_path: str) -> np.ndarray:
         """
-        Load KITTI label file
-        Format: [type, truncated, occluded, alpha, bbox[4], dimensions[3], location[3], rotation_y]
+        Load KITTI label file and convert to LiDAR coordinates
         Returns: boxes [N, 8] - x, y, z, w, l, h, rotation_y, class_id
         """
-        if not os.path.exists(path):
+        if not os.path.exists(path) or not os.path.exists(calib_path):
             return np.zeros((0, 8), dtype=np.float32)
         
+        tr_mat = self._get_calib_matrix(calib_path)
+        if tr_mat is None:
+            return np.zeros((0, 8), dtype=np.float32)
+
         boxes = []
         with open(path, 'r') as f:
             for line in f:
@@ -147,20 +174,9 @@ class KITTIDataset(Dataset):
                 else:
                     continue  # Skip Misc and unknown
                 
-                # Location (x, y, z)
-                x = float(parts[11])
-                y = float(parts[12])
-                z = float(parts[13])
-                
-                # Dimensions (h, w, l) -> KITTI format
-                h = float(parts[8])
-                w = float(parts[9])
-                l = float(parts[10])
-                
-                # Rotation
-                rotation_y = float(parts[14])
-                
-                boxes.append([x, y, z, w, l, h, rotation_y, class_id])
+                box_cam = [float(x) for x in parts[8:15]] # h, w, l, x, y, z, yaw
+                box_lidar = self._box_cam_to_lidar(box_cam, tr_mat)
+                boxes.append(np.append(box_lidar, class_id))
         
         if len(boxes) == 0:
             return np.zeros((0, 8), dtype=np.float32)
