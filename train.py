@@ -1,5 +1,6 @@
 import os
 import sys
+import csv
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -269,6 +270,12 @@ def main():
     # Create checkpoint dir
     os.makedirs(config['training']['checkpoint_dir'], exist_ok=True)
     
+    # Initialize metrics CSV log file
+    csv_file_path = os.path.join(config['training']['checkpoint_dir'], 'training_metrics.csv')
+    with open(csv_file_path, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'Total Loss', 'Heatmap Loss', 'Regression Loss', 'Learning Rate'])
+    
     # Training loop
     num_epochs = config['training']['num_epochs']
     
@@ -291,11 +298,25 @@ def main():
         print(f"{'='*50}")
         
         loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches, scheduler)
+        current_lr = optimizer.param_groups[0]['lr']
+        
         print(f"\nEpoch {epoch} Summary:")
         print(f"  Total Loss: {loss_dict['total_loss']:.4f}")
         print(f"  Heatmap Loss: {loss_dict['heatmap_loss']:.4f}")
         print(f"  Regression Loss: {loss_dict['reg_loss']:.4f}")
+        print(f"  Learning Rate: {current_lr:.2e}")
         
+        # Append metrics to CSV file
+        with open(csv_file_path, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                epoch,
+                f"{loss_dict['total_loss']:.6f}",
+                f"{loss_dict['heatmap_loss']:.6f}",
+                f"{loss_dict['reg_loss']:.6f}",
+                f"{current_lr:.6e}"
+            ])
+            
         # Save checkpoint
         if epoch % 5 == 0:
             checkpoint_path = os.path.join(
