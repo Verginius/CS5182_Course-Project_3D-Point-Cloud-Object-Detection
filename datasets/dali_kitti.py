@@ -29,8 +29,10 @@ class KITTIDALIPipeline(Pipeline):
         points = fn.reinterpret(raw_bin, dtype=types.FLOAT)
         points = fn.reshape(points, shape=[-1, 4])
 
-        # 不要在这里进行截断（fn.slice），否则会丢失 70% 的点云（KITTI通常有12w点）
-        # DALI 支持动态大小的 TensorList，返回完整的点云。
+        # DALI 迭代器要求输出是 dense tensor (相同形状) 才能合并为 batch。
+        # 我们使用 pad 将可变长度的点云填充到一个足够大的数值 (比如 150000 点)。
+        # 将 fill_value 设为 1000.0，这样越界的点就会在后续体素化时被自动扔弃。
+        points = fn.pad(points, fill_value=1000.0, axes=(0,), shape=[150000])
 
         return points.gpu(), label_idx.gpu()
 
@@ -139,8 +141,10 @@ class GTDataLoader:
         sampled_boxes = []
         for cls, count in self.sample_groups.items():
             if len(self.db_infos[cls]) == 0: continue
-            choices = np.random.choice(self.db_infos[cls], count)
-            for info in choices:
+            # 安全的 numpy 对象数组抽样方法
+            indices = np.random.choice(len(self.db_infos[cls]), count)
+            for idx in indices:
+                info = self.db_infos[cls][idx]
                 file_path = os.path.join(self.data_root, info['path']) if not os.path.isabs(info['path']) else info['path']
                 if not os.path.exists(file_path): continue
                 obj_p = np.fromfile(file_path, dtype=np.float32).reshape(-1, 4)
