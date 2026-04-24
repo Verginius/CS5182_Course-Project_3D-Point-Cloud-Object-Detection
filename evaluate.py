@@ -67,15 +67,16 @@ def nms(boxes: np.ndarray, scores: np.ndarray, threshold: float = 0.3) -> List[i
 def compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
     """Compute IoU between one box and multiple boxes"""
     # Simplified 2D IoU for demonstration
-    # In real implementation, use 3D IoU
-    x1 = np.maximum(box[0] - box[3]/2, boxes[:, 0] - boxes[:, 3]/2)
-    y1 = np.maximum(box[1] - box[4]/2, boxes[:, 1] - boxes[:, 4]/2)
-    x2 = np.minimum(box[0] + box[3]/2, boxes[:, 0] + boxes[:, 3]/2)
-    y2 = np.minimum(box[1] + box[4]/2, boxes[:, 1] + boxes[:, 4]/2)
+    # box format: [x, y, z, w, l, h, theta]
+    # x dimension uses l (box[4]), y dimension uses w (box[3])
+    x1 = np.maximum(box[0] - box[4]/2, boxes[:, 0] - boxes[:, 4]/2)
+    y1 = np.maximum(box[1] - box[3]/2, boxes[:, 1] - boxes[:, 3]/2)
+    x2 = np.minimum(box[0] + box[4]/2, boxes[:, 0] + boxes[:, 4]/2)
+    y2 = np.minimum(box[1] + box[3]/2, boxes[:, 1] + boxes[:, 3]/2)
     
     inter_area = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
-    box_area = box[3] * box[4]
-    boxes_area = boxes[:, 3] * boxes[:, 4]
+    box_area = box[4] * box[3]
+    boxes_area = boxes[:, 4] * boxes[:, 3]
     
     iou = inter_area / (box_area + boxes_area - inter_area + 1e-6)
     return iou
@@ -87,10 +88,12 @@ def compute_3d_iu(pred_box: np.ndarray, gt_boxes: np.ndarray) -> float:
     # Real implementation should handle orientation properly
     
     pred_center = pred_box[:3]
-    pred_size = pred_box[3:6]
+    # Box format: [w, l, h] -> Need to align with axes: x_size=l, y_size=w, z_size=h
+    pred_size = np.array([pred_box[4], pred_box[3], pred_box[5]])
     
     gt_centers = gt_boxes[:, :3]
-    gt_sizes = gt_boxes[:, 3:6]
+    # gt_boxes also [w, l, h] -> align with axes
+    gt_sizes = np.column_stack((gt_boxes[:, 4], gt_boxes[:, 3], gt_boxes[:, 5]))
     
     # Compute overlap
     min_corner = np.maximum(pred_center - pred_size/2, gt_centers - gt_sizes/2)
@@ -272,8 +275,9 @@ def decode_single_box(regression: np.ndarray, cx: int, cy: int) -> np.ndarray:
     # Inverse of coordinate mapping in loss.py
     # Feature stride = 16 (0.32m per pixel)
     out_size_factor = 0.32
-    x = cx * out_size_factor
-    y = cy * out_size_factor - 40.0
+    # 补偿半个像素宽度，将坐标移到栅格物理中心点
+    x = cx * out_size_factor + out_size_factor / 2.0
+    y = cy * out_size_factor - 40.0 + out_size_factor / 2.0
     
     # Decoding size (they were log encoded with 1e-6)
     w, l, h = np.exp(regression[:3])
