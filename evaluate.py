@@ -221,35 +221,44 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
     }
 
 
+from models.voxel_generator import VoxelGenerator
+from config import MODEL_CONFIG
+
 def prepare_data(points_list: List[np.ndarray], device: torch.device) -> Dict:
-    """Prepare batch data from point cloud list"""
+    """Prepare batch data using GPU VoxelGenerator"""
+    voxel_gen = VoxelGenerator(
+        voxel_size=MODEL_CONFIG.get('voxel_generator', {}).get('voxel_size', [0.02, 0.02, 0.1]),
+        point_cloud_range=MODEL_CONFIG.get('voxel_generator', {}).get('point_cloud_range', [0, -40.0, -3.0, 150.08, 40.0, 1.0]),
+        max_num_points=MODEL_CONFIG.get('voxel_generator', {}).get('max_num_points', 5),
+        max_voxels=MODEL_CONFIG.get('voxel_generator', {}).get('max_voxels', 80000)
+    )
+
     batch_voxels = []
     batch_coords = []
     batch_num_points = []
+    batch_size = len(points_list)
     
     for i, points in enumerate(points_list):
-        num_voxels = min(len(points), 80000)
-        max_points = 5
-        
-        voxels = torch.zeros(num_voxels, max_points, 4)
-        coords = torch.zeros(num_voxels, 4, dtype=torch.int32)
-        num_pts = torch.ones(num_voxels, dtype=torch.int32)
-        
-        for v in range(num_voxels):
-            pts_idx = np.random.choice(len(points), min(max_points, len(points)), replace=False)
-            voxels[v, :len(pts_idx)] = torch.from_numpy(points[pts_idx])
-            coords[v] = torch.tensor([i, v // 100, (v % 10000) // 100, v % 100])
-            num_pts[v] = len(pts_idx)
+        points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
+        if len(points_tensor) == 0:
+            continue
+            
+        voxels, coords, num_pts = voxel_gen.generate(points_tensor)
+        batch_idx_col = torch.full((coords.shape[0], 1), i, dtype=coords.dtype, device=device)
+        coords = torch.cat([batch_idx_col, coords], dim=1)
         
         batch_voxels.append(voxels)
         batch_coords.append(coords)
         batch_num_points.append(num_pts)
     
+    if len(batch_voxels) == 0:
+        return None
+
     return {
-        'voxels': torch.cat(batch_voxels, dim=0).to(device),
-        'voxel_coords': torch.cat(batch_coords, dim=0).to(device),
-        'voxel_num_points': torch.cat(batch_num_points, dim=0).to(device),
-        'batch_size': len(points_list)
+        'voxels': torch.cat(batch_voxels, dim=0),
+        'voxel_coords': torch.cat(batch_coords, dim=0),
+        'voxel_num_points': torch.cat(batch_num_points, dim=0),
+        'batch_size': batch_size
     }
 
 
