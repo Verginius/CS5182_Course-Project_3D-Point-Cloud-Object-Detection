@@ -117,7 +117,9 @@ def prepare_targets(boxes_list, device, heatmap_size=(250, 469), feature_stride=
     )
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, voxel_gen):
+from tqdm import tqdm
+
+def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches):
     model.train()
     
     total_loss_sum = 0.0
@@ -125,7 +127,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, 
     reg_loss_sum = 0.0
     num_batches = 0
 
-    for batch_idx, batch in enumerate(dataloader):
+    pbar = tqdm(enumerate(dataloader), total=total_batches, desc=f"Epoch {epoch}", leave=True, dynamic_ncols=True)
+    for batch_idx, batch in pbar:
         # 1. 此时 batch 应该包含 {'points': tensor, 'gt_boxes': list_of_tensors}
         points_list = batch['points'] 
         boxes_list = batch['gt_boxes'] 
@@ -157,6 +160,13 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, 
         heatmap_loss_sum += loss_dict['heatmap_loss'].item()
         reg_loss_sum += loss_dict['reg_loss'].item()
         num_batches += 1
+        
+        # Update progress bar
+        pbar.set_postfix({
+            'Loss': f"{loss.item():.4f}",
+            'Heatmap': f"{loss_dict['heatmap_loss'].item():.4f}",
+            'Reg': f"{loss_dict['reg_loss'].item():.4f}"
+        })
         
     if num_batches == 0:
         return {'total_loss': 0.0, 'heatmap_loss': 0.0, 'reg_loss': 0.0}
@@ -251,13 +261,18 @@ def main():
     
     # Training loop
     num_epochs = config['training']['num_epochs']
+    
+    # Calculate approximate total batches per epoch from DALI file list
+    total_samples = len(dali_pipe.file_list)
+    total_batches = (total_samples + config['training']['batch_size'] - 1) // config['training']['batch_size']
+    
     for epoch in range(1, num_epochs + 1):
         print(f"\n{'='*50}")
-        print(f"Epoch {epoch}/{num_epochs}")
+        print(f"Starting Epoch {epoch}/{num_epochs}")
         print(f"{'='*50}")
         
-        loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler, voxel_gen)
-        print(f"Epoch {epoch} Summary:")
+        loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches)
+        print(f"\nEpoch {epoch} Summary:")
         print(f"  Total Loss: {loss_dict['total_loss']:.4f}")
         print(f"  Heatmap Loss: {loss_dict['heatmap_loss']:.4f}")
         print(f"  Regression Loss: {loss_dict['reg_loss']:.4f}")
