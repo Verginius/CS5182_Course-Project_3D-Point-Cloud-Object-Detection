@@ -119,7 +119,7 @@ def prepare_targets(boxes_list, device, heatmap_size=(250, 469), num_classes=3):
 
 from tqdm import tqdm
 
-def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches):
+def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches, scheduler=None):
     model.train()
     
     total_loss_sum = 0.0
@@ -161,6 +161,10 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, 
         scaler.step(optimizer)
         scaler.update()
         
+        # Step the scheduler
+        if scheduler is not None:
+            scheduler.step()
+        
         total_loss_sum += loss_dict['total_loss'].item()
         heatmap_loss_sum += loss_dict['heatmap_loss'].item()
         reg_loss_sum += loss_dict['reg_loss'].item()
@@ -170,7 +174,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, 
         pbar.set_postfix({
             'Loss': f"{loss.item():.4f}",
             'Heatmap': f"{loss_dict['heatmap_loss'].item():.4f}",
-            'Reg': f"{loss_dict['reg_loss'].item():.4f}"
+            'Reg': f"{loss_dict['reg_loss'].item():.4f}",
+            'LR': f"{optimizer.param_groups[0]['lr']:.2e}"
         })
         
     if num_batches == 0:
@@ -226,7 +231,7 @@ def main():
     })
     
     # Optimizer
-    optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'])    
+    optimizer = optim.AdamW(model.parameters(), lr=config['training']['learning_rate'], weight_decay=config['training'].get('weight_decay', 0.01))    
     scaler = torch.amp.GradScaler('cuda')  # AMP 训练的梯度缩放器
 
     # 1. 创建 DALI 原始管线
@@ -271,12 +276,21 @@ def main():
     total_samples = len(dali_pipe.file_list)
     total_batches = (total_samples + config['training']['batch_size'] - 1) // config['training']['batch_size']
     
+    # 学习率调度器 (OneCycleLR) - 提升模型收敛精度
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=config['training']['learning_rate'], 
+        steps_per_epoch=total_batches, 
+        epochs=num_epochs,
+        pct_start=0.4
+    )
+
     for epoch in range(1, num_epochs + 1):
         print(f"\n{'='*50}")
         print(f"Starting Epoch {epoch}/{num_epochs}")
         print(f"{'='*50}")
         
-        loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches)
+        loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler, voxel_gen, total_batches, scheduler)
         print(f"\nEpoch {epoch} Summary:")
         print(f"  Total Loss: {loss_dict['total_loss']:.4f}")
         print(f"  Heatmap Loss: {loss_dict['heatmap_loss']:.4f}")

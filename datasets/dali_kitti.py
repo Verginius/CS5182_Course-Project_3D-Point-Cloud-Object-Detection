@@ -128,6 +128,10 @@ class GTDataLoader:
                 # 4. Combine boxes
                 all_boxes = np.concatenate([orig_boxes, sampled_boxes], axis=0) if len(sampled_boxes) > 0 else orig_boxes
                 
+                # 5. Global Data Augmentation
+                if self.dali_pipe.split == 'training':
+                    sampled_pts, all_boxes = self._apply_global_augmentation(sampled_pts, all_boxes)
+                
                 final_points_batch.append(sampled_pts)
                 final_boxes_batch.append(all_boxes)
             
@@ -135,6 +139,41 @@ class GTDataLoader:
                 'points': final_points_batch, 
                 'gt_boxes': final_boxes_batch
             }
+
+    def _apply_global_augmentation(self, points, boxes):
+        """Apply random rotation, scaling, and translation to both points and boxes"""
+        if len(boxes) == 0:
+            return points, boxes
+            
+        # 1. Random rotation around Z
+        angle = np.random.uniform(-np.pi / 4, np.pi / 4)
+        cos_a, sin_a = np.cos(angle), np.sin(angle)
+        rot_mat = np.array([
+            [cos_a, -sin_a, 0],
+            [sin_a, cos_a, 0],
+            [0, 0, 1]
+        ], dtype=np.float32)
+        
+        # Apply to points
+        valid_mask = points[:, 0] < 900.0  # skip padding points
+        points[valid_mask, :3] = points[valid_mask, :3] @ rot_mat.T
+        
+        # Apply to boxes (x, y, z) and yaw
+        boxes[:, :3] = boxes[:, :3] @ rot_mat.T
+        boxes[:, 6] += angle
+        
+        # 2. Random scaling
+        scale = np.random.uniform(0.95, 1.05)
+        points[valid_mask, :3] *= scale
+        boxes[:, :3] *= scale
+        boxes[:, 3:6] *= scale  # w, l, h
+        
+        # 3. Random translation
+        trans = np.random.uniform(-0.2, 0.2, size=(3,)).astype(np.float32)
+        points[valid_mask, :3] += trans
+        boxes[:, :3] += trans
+        
+        return points, boxes
 
     def apply_gt_sampling(self, points):
         all_sampled_pts = [points]

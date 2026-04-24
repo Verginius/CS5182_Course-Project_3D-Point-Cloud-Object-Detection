@@ -156,7 +156,7 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
         for k in range(min(num_dets, 100)):
             score = topk_scores[c, k]
             # 置信度过滤，防止测试结果中混入大量低分噪声背景
-            if score < 0.1:
+            if score < 0.3:
                 continue
                 
             idx = topk_idx[c, k]
