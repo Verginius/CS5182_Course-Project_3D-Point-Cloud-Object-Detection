@@ -197,7 +197,7 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
         for j, gt_box in enumerate(gt_boxes):
             if j in matched_gt:
                 continue
-            iou = compute_3d_iu(pred_box, gt_box.reshape(1, -1))[0]
+            iou = compute_3d_iu(pred_box, gt_box.reshape(1, -1))
             if iou > best_iou:
                 best_iou = iou
                 best_gt_idx = j
