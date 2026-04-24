@@ -133,15 +133,13 @@ def generate_heatmap_target(boxes, heatmap_size, feature_stride=8, num_classes=3
     cls = boxes[:, 7].long()  # class_id
     
     # Convert world coords to feature map coords
-    # Feature map: [-75, 75]m -> [0, W/H]
-    scale = W / 150.0  # Assuming 150m range (-75 to 75)
+    # Point cloud range: X: [0, 150.08], Y: [-40, 40]
+    # Voxel size: [0.02, 0.02]
+    # Feature stride (overall downsampling): 16x
+    out_size_factor = 0.02 * 16  # 0.32m per pixel
     
-    center_x = (x + 75.0) * scale
-    center_y = (y + 75.0) * scale
-    
-    # Downsample to feature map
-    center_x = center_x / feature_stride
-    center_y = center_y / feature_stride
+    center_x = x / out_size_factor
+    center_y = (y + 40.0) / out_size_factor
     
     for i in range(len(boxes)):
         cx = int(center_x[i].item())

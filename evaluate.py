@@ -145,7 +145,7 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
             y, x = idx // W, idx % W
             
             # Decode box
-            box = decode_single_box(regression[:, y, x])
+            box = decode_single_box(regression[:, y, x], x, y)
             det_boxes.append(box)
             det_scores.append(topk_scores[c, k])
             det_classes.append(c)
@@ -262,17 +262,25 @@ def prepare_data(points_list: List[np.ndarray], device: torch.device) -> Dict:
     }
 
 
-def decode_single_box(regression: np.ndarray) -> np.ndarray:
-    """Decode a single box from regression values"""
-    # Simplified decoding
-    w, l, h = np.exp(regression[:3] * 0.5)
+def decode_single_box(regression: np.ndarray, cx: int, cy: int) -> np.ndarray:
+    """Decode a single box from regression values and heatmap coordinates"""
+    # Inverse of coordinate mapping in loss.py
+    # Feature stride = 16 (0.32m per pixel)
+    out_size_factor = 0.32
+    x = cx * out_size_factor
+    y = cy * out_size_factor - 40.0
+    
+    # Decoding size (they were log encoded with 1e-6)
+    w, l, h = np.exp(regression[:3])
+    
     sin_theta = regression[3]
     cos_theta = regression[4]
     theta = np.arctan2(sin_theta, cos_theta)
-    z = regression[5]
-    depth = regression[6] * 150
     
-    return np.array([0, 0, z, w, l, h, theta])
+    z = regression[5]
+    # depth = np.exp(regression[6]) # Optional if we need to refine x,y using depth, but for now we just use the grid x,y
+    
+    return np.array([x, y, z, w, l, h, theta])
 
 
 def main():
