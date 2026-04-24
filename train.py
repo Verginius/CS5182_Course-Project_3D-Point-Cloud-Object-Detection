@@ -125,7 +125,11 @@ def prepare_targets(boxes_list, device, heatmap_size=(250, 469), feature_stride=
 
 def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler):
     model.train()
-    # ... 损失统计变量 ...
+    
+    total_loss_sum = 0.0
+    heatmap_loss_sum = 0.0
+    reg_loss_sum = 0.0
+    num_batches = 0
 
     for batch_idx, batch in enumerate(dataloader):
         # 1. 此时 batch 应该包含 {'points': tensor, 'gt_boxes': list_of_tensors}
@@ -154,6 +158,20 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler):
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
+        
+        total_loss_sum += loss_dict['total_loss'].item()
+        heatmap_loss_sum += loss_dict['heatmap_loss'].item()
+        reg_loss_sum += loss_dict['reg_loss'].item()
+        num_batches += 1
+        
+    if num_batches == 0:
+        return {'total_loss': 0.0, 'heatmap_loss': 0.0, 'reg_loss': 0.0}
+        
+    return {
+        'total_loss': total_loss_sum / num_batches,
+        'heatmap_loss': heatmap_loss_sum / num_batches,
+        'reg_loss': reg_loss_sum / num_batches
+    }
 
 
 def main():
