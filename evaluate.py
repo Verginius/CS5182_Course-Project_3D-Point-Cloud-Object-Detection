@@ -11,14 +11,14 @@ from datasets.kitti import KITTIDataset, kitti_collate_fn
 
 def load_model(checkpoint_path: str, config: Dict, device: torch.device):
     """Load model from checkpoint"""
-    model_cfg = config['model']
+    model_cfg = config
     
     # Build model
     second = SECOND(model_cfg)
     center_head = CenterHead(
         in_channels=model_cfg.get('num_bev_features', 640),
         num_class=model_cfg['num_class'],
-        feature_stride=config.get('head', {}).get('feature_stride', 8)
+        feature_stride=model_cfg.get('head', {}).get('feature_stride', 16)
     )
     
     model = torch.nn.ModuleDict({
@@ -119,7 +119,7 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
         bev_features = preds.get('features', preds.get('cls_preds'))
         
         if bev_features is None:
-            bev_features = torch.randn(1, 1280, 88, 100, device=device)
+            bev_features = torch.randn(1, 640, 250, 469, device=device)
         
         head_preds = model['center_head'](bev_features)
     
@@ -267,17 +267,9 @@ def decode_single_box(regression: np.ndarray) -> np.ndarray:
 
 
 def main():
+    from config import MODEL_CONFIG, DATA_CONFIG
     # Config
-    config = {
-        'model': {
-            'grid_size': [40, 1408, 1600],
-            'num_class': 3,
-            'num_bev_features': 1280,
-        },
-        'head': {
-            'feature_stride': 8,
-        },
-    }
+    config = MODEL_CONFIG
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -302,17 +294,17 @@ def main():
     
     if model is None:
         # Create model for demo
-        second = SECOND(config['model'])
+        second = SECOND(config)
         center_head = CenterHead(
-            in_channels=config['model'].get('num_bev_features', 640),
-            num_class=config['model']['num_class']
+            in_channels=config.get('num_bev_features', 640),
+            num_class=config['num_class']
         )
         model = torch.nn.ModuleDict({'second': second, 'center_head': center_head})
         model = model.to(device)
     
     # Load KITTI dataset for evaluation
     print("\nLoading KITTI dataset for evaluation...")
-    kitti_root = '/root/autodl-tmp/data'  # Extracted data root
+    kitti_root = DATA_CONFIG['dataset_path']  # Extracted data root
     eval_dataset = KITTIDataset(
         data_root=kitti_root,
         split='val',
