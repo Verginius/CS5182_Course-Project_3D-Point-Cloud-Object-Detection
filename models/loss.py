@@ -9,14 +9,17 @@ def _neg_loss(pred, gt):
     pred: [B, C, H, W] predicted heatmap
     gt: [B, C, H, W] ground truth heatmap (0 or 1)
     """
+    # 限制概率的边界，防止在 AMP FP16/BF16 模式下溢出 (例如 1e-12 会被截断为 0.0)
+    pred = torch.clamp(pred, min=1e-4, max=1.0 - 1e-4)
+
     pos_inds = gt.eq(1).float()
     neg_inds = gt.lt(1).float()
     
     neg_weights = torch.pow(1 - gt, 4)
     
     loss = 0
-    pos_loss = torch.log(pred + 1e-12) * torch.pow(1 - pred, 2) * pos_inds
-    neg_loss = torch.log(1 - pred + 1e-12) * torch.pow(pred, 2) * neg_weights * neg_inds
+    pos_loss = torch.log(pred) * torch.pow(1 - pred, 2) * pos_inds
+    neg_loss = torch.log(1 - pred) * torch.pow(pred, 2) * neg_weights * neg_inds
     
     num_pos = pos_inds.float().sum()
     pos_loss = pos_loss.sum()
