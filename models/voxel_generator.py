@@ -46,22 +46,47 @@ class VoxelGenerator:
             coordinates: [M, 4] - (batch_idx, z, y, x)
             num_points: [M]
         """
-        # Import spconv voxel generator
+        # If it's a PyTorch tensor, use GPU generation!
+        is_tensor = isinstance(points, torch.Tensor)
+        device = points.device if is_tensor else torch.device('cpu')
+        
+        if is_tensor and device.type == 'cuda':
+            try:
+                from spconv.pytorch.utils import PointToVoxel
+                if not hasattr(self, '_gpu_generator'):
+                    self._gpu_generator = PointToVoxel(
+                        vsize_xyz=self.voxel_size,
+                        coors_range_xyz=self.point_cloud_range,
+                        num_point_features=points.shape[-1],
+                        max_num_voxels=self.max_voxels,
+                        max_num_points_per_voxel=self.max_num_points,
+                        device=device
+                    )
+                voxels, coordinates, num_points = self._gpu_generator(points)
+                return voxels, coordinates, num_points
+            except ImportError:
+                pass # Fallback to CPU if spconv.pytorch is not available
+                
+        # CPU Fallback
+        if is_tensor:
+            points = points.cpu().numpy()
+
         try:
             from spconv.utils import VoxelGeneratorV2
             voxel_generator = VoxelGeneratorV2(
-                voxel_size=self.voxel_size,
-                point_cloud_range=self.point_cloud_range,
-                max_num_points=self.max_num_points,
-                max_voxels=self.max_voxels
+                vsize_xyz=self.voxel_size,
+                coors_range_xyz=self.point_cloud_range,
+                num_point_features=points.shape[-1],
+                max_num_voxels=self.max_voxels,
+                max_num_points_per_voxel=self.max_num_points
             )
-        except ImportError:
-            # Fallback to custom implementation
-            return self._generate_fallback(points)
-        
-        # Generate voxels
-        voxels, coordinates, num_points = voxel_generator.generate(points)
-        
+            voxels, coordinates, num_points = voxel_generator.generate(points)
+        except Exception:
+            voxels, coordinates, num_points = self._generate_fallback(points)
+            
+        if is_tensor:
+            return torch.from_numpy(voxels).to(device), torch.from_numpy(coordinates).to(device), torch.from_numpy(num_points).to(device)
+            
         return voxels, coordinates, num_points
     
     def _generate_fallback(self, points: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

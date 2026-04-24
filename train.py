@@ -60,47 +60,41 @@ def build_model(cfg):
     })
 
 
-def prepare_batch_data(points_list, boxes_list, device):
+def prepare_batch_data(points_list, device, voxel_gen):
     """
-    Prepare batch data from point clouds and boxes
-    boxes_list: list of [N_i, 8] arrays (x,y,z,w,l,h,rot,class_id)
+    Prepare batch data from point clouds using GPU voxelizer
     """
-    voxel_gen = VoxelGenerator(
-        voxel_size=[0.02, 0.02, 0.1],
-        point_cloud_range=[0, -40.0, -3.0, 150.08, 40.0, 1.0],
-        max_num_points=32,
-        max_voxels=80000
-    )
-    
     batch_voxels = []
     batch_coords = []
     batch_num_points = []
     batch_size = len(points_list)
     
     for i, points in enumerate(points_list):
-        points = np.asarray(points)
-        num_points = len(points)
+        # Convert to GPU tensor
+        points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
+        num_points = len(points_tensor)
         
         if num_points == 0:
             continue
         
-        # Use real VoxelGenerator
-        voxels, coords, num_pts = voxel_gen.generate(points)
+        # Generate on GPU
+        voxels, coords, num_pts = voxel_gen.generate(points_tensor)
         
-        # Adjust batch_idx for current sample in batch
-        coords[:, 0] = i
+        # Adjust batch_idx (pad a column of batch indices)
+        batch_idx_col = torch.full((coords.shape[0], 1), i, dtype=coords.dtype, device=device)
+        coords = torch.cat([batch_idx_col, coords], dim=1)
         
-        batch_voxels.append(torch.from_numpy(voxels))
-        batch_coords.append(torch.from_numpy(coords))
-        batch_num_points.append(torch.from_numpy(num_pts))
+        batch_voxels.append(voxels)
+        batch_coords.append(coords)
+        batch_num_points.append(num_pts)
     
     if len(batch_voxels) == 0:
         return None
     
     return {
-        'voxels': torch.cat(batch_voxels, dim=0).to(device),
-        'voxel_coords': torch.cat(batch_coords, dim=0).to(device),
-        'voxel_num_points': torch.cat(batch_num_points, dim=0).to(device),
+        'voxels': torch.cat(batch_voxels, dim=0),
+        'voxel_coords': torch.cat(batch_coords, dim=0),
+        'voxel_num_points': torch.cat(batch_num_points, dim=0),
         'batch_size': batch_size
     }
 
@@ -123,7 +117,7 @@ def prepare_targets(boxes_list, device, heatmap_size=(250, 469), feature_stride=
     )
 
 
-def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler):
+def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, voxel_gen):
     model.train()
     
     total_loss_sum = 0.0
@@ -136,8 +130,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler):
         points_list = batch['points'] 
         boxes_list = batch['gt_boxes'] 
         
-        # 2. 这里的 prepare_batch_data 内部要确保 voxel_generator 与 cfg 一致
-        batch_dict = prepare_batch_data(points_list, boxes_list, device)
+        # 2. 调用 GPU 上的体素化生成器
+        batch_dict = prepare_batch_data(points_list, device, voxel_gen)
         
         # 3. 使用 AMP (自动混合精度) 充分发挥 5090 性能
         optimizer.zero_grad()
@@ -202,6 +196,14 @@ def main():
     model = model.to(device)
     print("Model built successfully")
     
+    # Voxel Generator (Shared for all batches, on GPU)
+    voxel_gen = VoxelGenerator(
+        voxel_size=config['model'].get('voxel_generator', {}).get('voxel_size', [0.02, 0.02, 0.1]),
+        point_cloud_range=config['model'].get('voxel_generator', {}).get('point_cloud_range', [0, -40.0, -3.0, 150.08, 40.0, 1.0]),
+        max_num_points=config['model'].get('voxel_generator', {}).get('max_num_points', 5),
+        max_voxels=config['model'].get('voxel_generator', {}).get('max_voxels', 80000)
+    )
+    
     # Loss function
     criterion = CenterLoss(loss_weights={
         'heatmap': 1.0,
@@ -254,7 +256,7 @@ def main():
         print(f"Epoch {epoch}/{num_epochs}")
         print(f"{'='*50}")
         
-        loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler)
+        loss_dict = train_epoch(model, train_loader, optimizer, device, epoch, criterion, scaler, voxel_gen)
         print(f"Epoch {epoch} Summary:")
         print(f"  Total Loss: {loss_dict['total_loss']:.4f}")
         print(f"  Heatmap Loss: {loss_dict['heatmap_loss']:.4f}")
