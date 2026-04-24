@@ -29,9 +29,8 @@ class KITTIDALIPipeline(Pipeline):
         points = fn.reinterpret(raw_bin, dtype=types.FLOAT)
         points = fn.reshape(points, shape=[-1, 4])
 
-        # 在 DALI 内先简单截断到一个较大的值，防止 GPU 显存溢出
-        # 此时先不急着 pad 到 60000，因为后面要贴 GT
-        points = fn.slice(points, [0, 0], [40000, 4], axes=[0, 1])
+        # 不要在这里进行截断（fn.slice），否则会丢失 70% 的点云（KITTI通常有12w点）
+        # DALI 支持动态大小的 TensorList，返回完整的点云。
 
         return points.gpu(), label_idx.gpu()
 
@@ -115,7 +114,9 @@ class GTDataLoader:
                 
                 # 3. Pad/Slice points
                 if len(sampled_pts) > 60000:
-                    sampled_pts = sampled_pts[:60000]
+                    # 使用无放回随机抽样代替粗暴的顺序切片，保留完整的物体轮廓
+                    indices = np.random.choice(len(sampled_pts), 60000, replace=False)
+                    sampled_pts = sampled_pts[indices]
                 else:
                     pad = np.zeros((60000 - len(sampled_pts), 4), dtype=np.float32)
                     # 将 padding 假点移到 1000m 外，从而让 GPU Voxelizer 自动剔除它们，防止原点处堆积几万个假点导致 inf

@@ -141,13 +141,18 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
     
     for c in range(C):
         for k in range(min(num_dets, 100)):
+            score = topk_scores[c, k]
+            # 置信度过滤，防止测试结果中混入大量低分噪声背景
+            if score < 0.1:
+                continue
+                
             idx = topk_idx[c, k]
             y, x = idx // W, idx % W
             
             # Decode box
             box = decode_single_box(regression[:, y, x], x, y)
             det_boxes.append(box)
-            det_scores.append(topk_scores[c, k])
+            det_scores.append(score)
             det_classes.append(c)
     
     if len(det_boxes) == 0:
