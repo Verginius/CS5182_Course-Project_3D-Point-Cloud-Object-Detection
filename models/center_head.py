@@ -110,8 +110,8 @@ def decode_boxes(regression, y_coords, x_coords):
     # Decode x, y from grid coordinates
     # Feature stride is 16 (0.32m per pixel) based on current architecture
     out_size_factor = 0.32
-    x = x_coords.float().unsqueeze(-1) * out_size_factor
-    y = y_coords.float().unsqueeze(-1) * out_size_factor - 40.0
+    x = x_coords.float().unsqueeze(-1) * out_size_factor + out_size_factor / 2.0
+    y = y_coords.float().unsqueeze(-1) * out_size_factor - 40.0 + out_size_factor / 2.0
     
     # Build box: (x, y, z, w, l, h, heading)
     boxes = torch.cat([

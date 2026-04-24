@@ -94,14 +94,13 @@ class CenterLoss(nn.Module):
         }
 
 
-def generate_heatmap_target(boxes, heatmap_size, feature_stride=8, num_classes=3):
+def generate_heatmap_target(boxes, heatmap_size, num_classes=3):
     """
     Generate ground truth heatmap from 3D boxes
     
     Args:
         boxes: [N, 8] - x, y, z, w, l, h, rotation_y, class_id
         heatmap_size: (H, W) output heatmap size
-        feature_stride: downsampling factor
         num_classes: number of object classes
     
     Returns:
@@ -148,7 +147,8 @@ def generate_heatmap_target(boxes, heatmap_size, feature_stride=8, num_classes=3
         
         if 0 <= cx < W and 0 <= cy < H and c < num_classes:
             # Draw Gaussian heatmap
-            radius = max(1, int((l[i].item() + w[i].item()) / 4 / feature_stride))
+            # Convert physical size to pixel radius based on the grid resolution
+            radius = max(1, int((l[i].item() + w[i].item()) / 4 / out_size_factor))
             draw_gaussian(heatmap[c], (cx, cy), radius)
             
             # Set regression targets

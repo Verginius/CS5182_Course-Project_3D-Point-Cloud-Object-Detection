@@ -99,12 +99,12 @@ def prepare_batch_data(points_list, device, voxel_gen):
     }
 
 
-def prepare_targets(boxes_list, device, heatmap_size=(250, 469), feature_stride=8, num_classes=3):
+def prepare_targets(boxes_list, device, heatmap_size=(250, 469), num_classes=3):
     heatmap_list, regression_list, mask_list = [], [], []
     for boxes in boxes_list:
         boxes_tensor = torch.tensor(boxes, dtype=torch.float32, device=device)
         heatmap, regression, mask = generate_heatmap_target(
-            boxes_tensor, heatmap_size, feature_stride, num_classes
+            boxes_tensor, heatmap_size, num_classes
         )
         heatmap_list.append(heatmap.unsqueeze(0))
         regression_list.append(regression.unsqueeze(0))
