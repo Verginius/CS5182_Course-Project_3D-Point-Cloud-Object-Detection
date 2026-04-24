@@ -127,7 +127,17 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
         head_preds = model['center_head'](bev_features)
     
     # Post-processing
-    heatmap = head_preds['heatmap'][0].cpu().numpy()  # [C, H, W]
+    heatmap_tensor = head_preds['heatmap'][0]  # [C, H, W]
+    
+    # Apply 3x3 MaxPool to find local maxima (Peak Extraction)
+    # This prevents the top-100 from clustering around a single object!
+    local_max = torch.nn.functional.max_pool2d(
+        heatmap_tensor.unsqueeze(0), kernel_size=3, stride=1, padding=1
+    ).squeeze(0)
+    
+    heatmap_tensor = heatmap_tensor * (heatmap_tensor == local_max).float()
+    
+    heatmap = heatmap_tensor.cpu().numpy()  # [C, H, W]
     regression = head_preds['regression'][0].cpu().numpy()  # [7, H, W]
     
     # Get top-k predictions
