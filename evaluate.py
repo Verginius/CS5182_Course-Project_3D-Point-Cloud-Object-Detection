@@ -278,7 +278,8 @@ def decode_single_box(regression: np.ndarray, cx: int, cy: int) -> np.ndarray:
     theta = np.arctan2(sin_theta, cos_theta)
     
     z = regression[5]
-    # depth = np.exp(regression[6]) # Optional if we need to refine x,y using depth, but for now we just use the grid x,y
+    # Optional if we need to refine x,y using depth, but for now we just use the grid x,y
+    # depth = np.exp(regression[6]) 
     
     return np.array([x, y, z, w, l, h, theta])
 

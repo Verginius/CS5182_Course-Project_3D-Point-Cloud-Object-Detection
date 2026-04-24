@@ -77,20 +77,20 @@ def gather_heatmap(heatmap, topk_indices):
     return topk_scores, y_coords, x_coords
 
 
-def decode_boxes(regression, y_coords, x_coords, feature_stride=8):
+def decode_boxes(regression, y_coords, x_coords):
     """
     Decode box parameters from regression map
     regression: [B, 7, H, W] - (w, l, h, sin, cos, z, depth)
+    y_coords: [B, K] heatmap y indices
+    x_coords: [B, K] heatmap x indices
     Returns: [B, K, 7] boxes in (x, y, z, w, l, h, heading)
     """
     batch_size = regression.shape[0]
     
     # Extract regression values at predicted centers
-    # regression shape: [B, 7, H, W]
     regression = regression.permute(0, 2, 3, 1)  # [B, H, W, 7]
     
-    # Gather at center locations
-    batch_indices = torch.arange(batch_size, device=regression.device).view(-1, 1, 1)
+    batch_indices = torch.arange(batch_size, device=regression.device).view(-1, 1)
     
     reg_values = regression[batch_indices, y_coords, x_coords]  # [B, K, 7]
     
@@ -99,17 +99,23 @@ def decode_boxes(regression, y_coords, x_coords, feature_stride=8):
     cos_theta = reg_values[..., 4:5]
     heading = torch.atan2(sin_theta, cos_theta)
     
-    # Decode depth
-    depth = torch.sigmoid(reg_values[..., 6:7]) * 150.0  # Assume max 150m
+    # Decode sizes (log encoded)
+    w = torch.exp(reg_values[..., 0:1])
+    l = torch.exp(reg_values[..., 1:2])
+    h = torch.exp(reg_values[..., 2:3])
+    
+    # Decode z
+    z = reg_values[..., 5:6]
+    
+    # Decode x, y from grid coordinates
+    # Feature stride is 16 (0.32m per pixel) based on current architecture
+    out_size_factor = 0.32
+    x = x_coords.float().unsqueeze(-1) * out_size_factor
+    y = y_coords.float().unsqueeze(-1) * out_size_factor - 40.0
     
     # Build box: (x, y, z, w, l, h, heading)
     boxes = torch.cat([
-        reg_values[..., 0:1],  # w
-        reg_values[..., 1:2],  # l
-        reg_values[..., 2:3],  # h
-        reg_values[..., 5:6],  # z
-        depth,
-        heading
+        x, y, z, w, l, h, heading
     ], dim=-1)
     
     return boxes
