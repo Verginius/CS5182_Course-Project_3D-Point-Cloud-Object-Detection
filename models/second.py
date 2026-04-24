@@ -17,6 +17,8 @@ class MeanVFE(nn.Module):
         voxel_num_points: [N]
         """
         points_sum = torch.sum(voxel_features[:, :, :self.num_point_features], dim=1)
+        # 防止体素内点数出现 0（通常体素生成器不会有全空体素，但作为安全兜底防 NaN/Inf）
+        voxel_num_points = torch.clamp(voxel_num_points, min=1.0)
         voxel_features = points_sum / voxel_num_points.type_as(voxel_features).view(-1, 1)
         return voxel_features
 

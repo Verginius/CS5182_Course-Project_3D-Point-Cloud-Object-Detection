@@ -153,6 +153,11 @@ def train_epoch(model, dataloader, optimizer, device, epoch, criterion, scaler, 
 
         # 5. 反向传播优化
         scaler.scale(loss).backward()
+        
+        # 梯度截断，防止 AMP 初期因梯度爆炸产生 NaN/Inf
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        
         scaler.step(optimizer)
         scaler.update()
         

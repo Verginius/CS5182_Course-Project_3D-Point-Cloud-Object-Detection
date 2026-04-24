@@ -118,6 +118,8 @@ class GTDataLoader:
                     sampled_pts = sampled_pts[:60000]
                 else:
                     pad = np.zeros((60000 - len(sampled_pts), 4), dtype=np.float32)
+                    # 将 padding 假点移到 1000m 外，从而让 GPU Voxelizer 自动剔除它们，防止原点处堆积几万个假点导致 inf
+                    pad[:, :3] = 1000.0
                     sampled_pts = np.concatenate([sampled_pts, pad], axis=0)
                 
                 # 4. Combine boxes
