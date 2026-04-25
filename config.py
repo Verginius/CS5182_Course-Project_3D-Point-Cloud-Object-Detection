@@ -39,7 +39,7 @@ TRAIN_CONFIG = {
     'num_epochs': 20,
     'eval_interval': 5, # 前期每 5 轮验证一次，节省时间
     'final_eval_interval': 1, # 最后阶段每轮验证
-    'learning_rate': 0.003,
+    'learning_rate': 0.001,
     'weight_decay': 0.0001,
     'checkpoint_dir': 'output/ckpt',
     'log_interval': 10,
