@@ -228,7 +228,7 @@ def main():
     # Loss function
     criterion = CenterLoss(loss_weights={
         'heatmap': 1.0,
-        'regression': 0.1,
+        'regression': 1.0,
     })
     
     # Optimizer
