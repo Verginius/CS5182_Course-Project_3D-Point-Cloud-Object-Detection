@@ -38,7 +38,7 @@ def load_model(checkpoint_path: str, config: Dict, device: torch.device):
     return model
 
 
-def nms(boxes: np.ndarray, scores: np.ndarray, threshold: float = 0.3) -> List[int]:
+def nms(boxes: np.ndarray, scores: np.ndarray, threshold: float = 0.1) -> List[int]:
     """Non-Maximum Suppression"""
     if len(boxes) == 0:
         return []
@@ -156,7 +156,7 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
         for k in range(min(num_dets, 100)):
             score = topk_scores[c, k]
             # 置信度过滤，防止测试结果中混入大量低分噪声背景
-            if score < 0.3:
+            if score < 0.55:
                 continue
                 
             idx = topk_idx[c, k]
