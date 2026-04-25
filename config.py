@@ -36,10 +36,10 @@ MODEL_CONFIG = {
 # Training Configuration
 TRAIN_CONFIG = {
     'batch_size': 4,  # Adjust based on GPU memory
-    'num_epochs': 80,
+    'num_epochs': 20,
     'eval_interval': 5, # 前期每 5 轮验证一次，节省时间
     'final_eval_interval': 1, # 最后阶段每轮验证
-    'learning_rate': 0.002,
+    'learning_rate': 0.003,
     'weight_decay': 0.0001,
     'checkpoint_dir': 'output/ckpt',
     'log_interval': 10,

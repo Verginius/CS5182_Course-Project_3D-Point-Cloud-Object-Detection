@@ -145,6 +145,14 @@ class GTDataLoader:
         if len(boxes) == 0:
             return points, boxes
             
+        # 0. Random flip along Y-axis (左右翻转)
+        if np.random.rand() > 0.5:
+            # points (x, y, z, intensity)
+            points[:, 1] = -points[:, 1]
+            # boxes (x, y, z, w, l, h, yaw, cls)
+            boxes[:, 1] = -boxes[:, 1]
+            boxes[:, 6] = -boxes[:, 6]
+
         # 1. Random rotation around Z
         angle = np.random.uniform(-np.pi / 4, np.pi / 4)
         cos_a, sin_a = np.cos(angle), np.sin(angle)

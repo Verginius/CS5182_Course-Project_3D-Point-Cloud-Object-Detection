@@ -202,8 +202,8 @@ def main():
         },
         'training': {
             'batch_size': 4,
-            'num_epochs': 80,
-            'learning_rate': 0.001,
+            'num_epochs': 20,
+            'learning_rate': 0.003,
             'checkpoint_dir': 'output/ckpt',
         }
     }
