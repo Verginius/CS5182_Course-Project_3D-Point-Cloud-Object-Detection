@@ -1,73 +1,73 @@
-# SECOND-DeepOps: 基于 RTX 5090 与原生 spconv 的 SECOND 模型深度优化与重构
+# SECOND-DeepOps: Deep Optimization and Refactoring of SECOND based on RTX 5090 and native spconv
 
-## 1. 背景 (Background)
+## 1. Background
 
-在自动驾驶 3D 点云感知任务中，SECOND 模型凭借稀疏卷积（Sparse Convolution）成功平衡了检测精度与推理速度。然而，在复杂的高阶自动驾驶场景中，传统的 SECOND 面临以下局限性：
+In the 3D point cloud perception tasks of autonomous driving, the SECOND model successfully balances detection accuracy and inference speed via Sparse Convolution. However, in complex high-order autonomous driving scenarios, the traditional SECOND faces the following limitations:
 
-- **长尾目标定位差**：基于 Anchor 的检测头在处理非标准尺寸障碍物及任意朝向时缺乏柔性
-- **感知距离受限**：传统体素划分粒度较粗，导致远距离（>100m）小目标的特征大量丢失
-- **框架冗余**：主流框架在极致性能压榨和多线程预处理调度上存在灵活性壁垒
+- **Poor Localization of Long-tail Objects**: Anchor-based detection heads lack flexibility when handling obstacles of non-standard sizes and arbitrary orientations.
+- **Limited Perception Range**: The traditional coarse voxel division granularity leads to massive loss of features for distant small targets (>100m).
+- **Framework Redundancy**: Mainstream frameworks present flexibility barriers in extreme performance optimization and multi-threaded preprocessing scheduling.
 
-本方案依托 NVIDIA RTX 5090（Blackwell 架构，32GB GDDR7）提供的海量显存带宽与算力冗余，采用**纯 PyTorch + spconv 2.x** 进行底层重构，打造超高分辨率、极低延迟的自动驾驶 3D 检测基座。
+Relying on the massive memory bandwidth and computing power redundancy provided by the NVIDIA RTX 5090 (Blackwell architecture, 32GB GDDR7), this project undergoes a low-level refactoring using **Pure PyTorch + spconv 2.x** to build an ultra-high resolution and ultra-low latency 3D detection foundation for autonomous driving.
 
-## 2. 技术方案 (Technical Solution)
+## 2. Technical Solution
 
-### 2.1 动态高分辨率体素化 (Dynamic High-Res Voxelization)
+### 2.1 Dynamic High-Resolution Voxelization
 
-- 使用 `spconv.utils.VoxelGeneratorV2` 替代传统静态体素划分
-- 基础 voxel_size: `[0.02, 0.02, 0.1]`（从传统的 0.05 缩小）
-- 有效感知距离从 70 米提升至 150 米
+- Replaced traditional static voxel division with natively accelerated `spconv.pytorch.utils.PointToVoxel`.
+- Base voxel_size: `[0.02, 0.02, 0.1]` (shrunk from the traditional 0.05m).
+- Extended effective perception range from 70 meters to 150 meters.
 
-### 2.2 稀疏主干网络重构 (Sparse Backbone Redesign)
+### 2.2 Sparse Backbone Redesign
 
-- SubmanifoldSparseConv3d 基础特征通道数从 16 扩充至 32/64
-- Map2BEV 改进：引入 1×1 自适应卷积代替简单维度展平
+- Expanded `SubmanifoldSparseConv3d` base feature channels from 16 to 32/64.
+- Map2BEV Optimization: Replaced naive dimension flattening with customized feature shaping.
 
-### 2.3 Anchor-free 检测头升级 (Center-based Head)
+### 2.3 Center-based Head Upgrade
 
-- 移除 Anchor-based 分支与方向分类损失
-- 引入 CenterPoint 核心范式：预测目标中心点热力图
-- 回归目标的三维尺寸、深度及朝向角
+- Removed Anchor-based branches and direction classification loss.
+- Introduced the CenterPoint core paradigm: Predicting target center-point heatmaps.
+- Regressed 3D dimensions, depth, and orientation angles continuously to eliminate 180-degree ambiguity.
 
-### 2.4 RTX 5090 硬件级加速调优
+### 2.4 Hardware-level Acceleration for RTX 5090
 
-- NVIDIA DALI 进行点云预处理
-- PyTorch AMP（自动混合精度）FP16/BF16 计算
-- CUDAGraphs 捕获静态计算图
+- Point cloud preprocessing pipeline parallelized via **NVIDIA DALI**.
+- Deep integration of PyTorch **AMP** (Automatic Mixed Precision) for FP16 tensor core acceleration.
+- Removed out-of-bounds padding points dynamically to maximize sparse convolution throughput.
 
-## 3. 项目结构
+## 3. Project Structure
 
-```
+```text
 CS5182_New/
 ├── models/
 │   ├── __init__.py
-│   ├── second.py          # 稀疏主干网络
-│   ├── center_head.py     # Anchor-free 检测头
-│   └── voxel_generator.py # 动态体素生成器
-├── data/                  # 数据目录
+│   ├── second.py          # Sparse backbone network
+│   ├── center_head.py     # Anchor-free CenterPoint head
+│   └── voxel_generator.py # Dynamic voxel generator wrappers
+├── data/                  # Data directory (KITTI layout)
 ├── output/
-│   └── ckpt/              # 模型checkpoint
-├── train.py               # 训练脚本
-├── evaluate.py            # 评估脚本
-├── run_pipeline.py        # 流水线脚本
-├── config.py              # 配置文件
-├── environment.yml        # Conda 环境配置
-├── activate_env.sh        # 环境激活脚本
-└── requirements.txt       # 依赖
+│   └── ckpt/              # Model checkpoints & Logs
+├── train.py               # Main training script (OneCycleLR, DALI pipeline)
+├── evaluate.py            # Evaluation & NMS post-processing script
+├── run_pipeline.py        # Automated pipeline execution script
+├── config.py              # Central configuration file
+├── environment.yml        # Conda environment config
+├── activate_env.sh        # Environment activation script
+└── requirements.txt       # Dependencies (spconv-cu126)
 ```
 
-## 4. 性能指标
+## 4. Performance Metrics
 
-| 指标 | Baseline (OpenPCDet) | 优化版 (RTX 5090) |
-|------|---------------------|------------------|
-| 体素分辨率 | 0.05m | 0.02m |
-| 有效感知距离 | ~70m | 150m |
-| 推理速度 | 25-30 FPS | **74.45 FPS** |
-| 底层依赖 | OpenPCDet | 纯 PyTorch + spconv |
+| Metric | Baseline (OpenPCDet) | Optimized (RTX 5090) |
+|--------|----------------------|----------------------|
+| Voxel Resolution | 0.05m | **0.02m** |
+| Perception Range | ~70m | **150m** |
+| Inference Speed | 25-30 FPS | **74.45 FPS** |
+| Underlying Dependency | OpenPCDet | Pure PyTorch + spconv |
 
-### 4.1 最终验证集评估结果 (Evaluation Results)
+### 4.1 Final Evaluation Results
 
-在完全端到端的 80 轮 (Epochs) 训练后，我们在验证集上取得了卓越的性能表现和极致的推理速度：
+After 80 epochs of fully end-to-end training, we achieved remarkable performance and extreme inference speed on the validation set:
 
 ```text
 Evaluation Results
@@ -86,35 +86,35 @@ Inference Speed (FP16 Accelerated):
   FPS:         74.45 frames/s
 ```
 
-### 4.2 训练产出日志与模型 (Training Artifacts)
+### 4.2 Training Artifacts
 
-本项目包含完整的训练历史监控与日志留存功能，训练产出将自动保存在项目中：
-- **模型权重 (Weights)**: `output/ckpt/final_model.pth`
-- **训练指标原始数据**: `output/ckpt/training_metrics.csv`
-- **Loss / 学习率下降曲线图**: `output/training_metrics_plot.png`
+The project includes complete training history monitoring and logging capabilities. Training artifacts are automatically saved in the project:
+- **Model Weights**: `output/ckpt/final_model.pth`
+- **Raw Training Metrics**: `output/ckpt/training_metrics.csv`
+- **Loss / Learning Rate Curve Plot**: `output/training_metrics_plot.png`
 
-## 5. 快速开始
+## 5. Quick Start
 
-### 5.1 环境配置
+### 5.1 Environment Setup
 
 ```bash
-# 创建 Conda 环境
+# Create Conda environment
 conda env create -f environment.yml
 
-# 激活环境
+# Activate environment
 conda activate pointcloud_5090
 
-# 或使用项目脚本激活
+# Alternatively, use the project script to activate
 source activate_env.sh
 ```
 
-### 5.2 运行流水线
+### 5.2 Run Pipeline
 
 ```bash
-# 运行完整训练+评估流水线
+# Run the complete train + evaluation pipeline
 python run_pipeline.py
 
-# 或分别运行
+# Or run them separately
 python train.py
 python evaluate.py
 ```
