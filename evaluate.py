@@ -83,11 +83,13 @@ def compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
     return iou
 
 
-def compute_3d_iu(pred_box: np.ndarray, gt_boxes: np.ndarray) -> float:
-    """Compute 3D Intersection over Union"""
+def compute_3d_iu(pred_box: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
+    """Compute 3D Intersection over Union for an array of boxes"""
     # Simplified 3D IoU for demonstration
     # Real implementation should handle orientation properly
-    
+    if len(gt_boxes) == 0:
+        return np.array([])
+        
     pred_center = pred_box[:3]
     # Box format: [w, l, h] -> Need to align with axes: x_size=l, y_size=w, z_size=h
     pred_size = np.array([pred_box[4], pred_box[3], pred_box[5]])
@@ -109,29 +111,44 @@ def compute_3d_iu(pred_box: np.ndarray, gt_boxes: np.ndarray) -> float:
     union_vol = pred_vol + gt_vol - inter_vol
     iou_3d = inter_vol / (union_vol + 1e-6)
     
-    return np.max(iou_3d)
+    return iou_3d
+
+
+def compute_ap(recalls: np.ndarray, precisions: np.ndarray) -> float:
+    """Compute Average Precision using VOC 11-point or AUC method"""
+    rec = np.concatenate(([0.0], recalls, [1.0]))
+    prec = np.concatenate(([0.0], precisions, [0.0]))
+
+    # Compute envelope of precision
+    for i in range(prec.size - 1, 0, -1):
+        prec[i - 1] = np.maximum(prec[i - 1], prec[i])
+
+    # Integrate area under curve
+    indices = np.where(rec[1:] != rec[:-1])[0]
+    ap = np.sum((rec[indices + 1] - rec[indices]) * prec[indices + 1])
+    return ap
 
 
 def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: torch.device) -> Dict:
-    """Evaluate a single sample"""
+    """Evaluate a single sample and return per-class predictions and GTs"""
     # Prepare data (simplified)
     batch_dict = prepare_data([points], device)
     
-    # Inference
+    # Inference with FP16 for massive acceleration
     with torch.no_grad():
-        preds = model['second'](batch_dict)
-        bev_features = preds.get('features', preds.get('cls_preds'))
-        
-        if bev_features is None:
-            bev_features = torch.randn(1, 640, 250, 469, device=device)
-        
-        head_preds = model['center_head'](bev_features)
+        with torch.amp.autocast('cuda'):
+            preds = model['second'](batch_dict)
+            bev_features = preds.get('features', preds.get('cls_preds'))
+            
+            if bev_features is None:
+                bev_features = torch.randn(1, 640, 250, 469, device=device)
+            
+            head_preds = model['center_head'](bev_features)
     
     # Post-processing
     heatmap_tensor = head_preds['heatmap'][0]  # [C, H, W]
     
     # Apply 3x3 MaxPool to find local maxima (Peak Extraction)
-    # This prevents the top-100 from clustering around a single object!
     local_max = torch.nn.functional.max_pool2d(
         heatmap_tensor.unsqueeze(0), kernel_size=3, stride=1, padding=1
     ).squeeze(0)
@@ -147,98 +164,67 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
     topk_idx = np.argsort(heatmap_flat, axis=1)[:, -100:][:, ::-1]
     topk_scores = np.take_along_axis(heatmap_flat, topk_idx, axis=1)
     
-    # Decode boxes (simplified)
+    # Decode boxes
     num_dets = min(50, H * W)
-    det_boxes = []
-    det_scores = []
-    det_classes = []
+    class_results = {c: {'preds': [], 'num_gt': 0} for c in range(C)}
+    
+    # Record GTs per class
+    for c in range(C):
+        class_results[c]['num_gt'] = np.sum(gt_boxes[:, 7] == c) if len(gt_boxes) > 0 else 0
     
     for c in range(C):
+        det_boxes = []
+        det_scores = []
+        
         for k in range(min(num_dets, 100)):
             score = topk_scores[c, k]
-            # 置信度过滤，防止测试结果中混入大量低分噪声背景
-            # 80个 epoch 之后网络由于非常自信，整体置信度水涨船高，为了压制误报需要提高阈值
-            if score < 0.70:
+            # Lower threshold for collecting full AP curve
+            if score < 0.1:
                 continue
                 
             idx = topk_idx[c, k]
             y, x = idx // W, idx % W
             
-            # Decode box
             box = decode_single_box(regression[:, y, x], x, y)
             det_boxes.append(box)
             det_scores.append(score)
-            det_classes.append(c)
-    
-    if len(det_boxes) == 0:
-        return {'num_pred': 0, 'num_gt': len(gt_boxes), 'tp': 0, 'fp': 0, 'fn': len(gt_boxes)}
-    
-    det_boxes = np.array(det_boxes)
-    det_scores = np.array(det_scores)
-    det_classes = np.array(det_classes)
-    
-    # Apply NMS per class
-    final_boxes = []
-    final_scores = []
-    final_classes = []
-    
-    for c in range(C):
-        mask = det_classes == c
-        class_boxes = det_boxes[mask]
-        class_scores = det_scores[mask]
-        
-        if len(class_boxes) == 0:
+            
+        if len(det_boxes) == 0:
             continue
+            
+        det_boxes = np.array(det_boxes)
+        det_scores = np.array(det_scores)
         
-        keep = nms(class_boxes, class_scores)
-        final_boxes.extend(class_boxes[keep])
-        final_scores.extend(class_scores[keep])
-        final_classes.extend([c] * len(keep))
-    
-    if len(final_boxes) == 0:
-        return {'num_pred': 0, 'num_gt': len(gt_boxes), 'tp': 0, 'fp': 0, 'fn': len(gt_boxes)}
-    
-    final_boxes = np.array(final_boxes)
-    final_scores = np.array(final_scores)
-    
-    # Compute metrics
-    num_pred = len(final_boxes)
-    num_gt = len(gt_boxes)
-    
-    tp = 0
-    fp = 0
-    fn = 0
-    
-    matched_gt = set()
-    for i, pred_box in enumerate(final_boxes):
-        best_iou = 0
-        best_gt_idx = -1
+        # Apply NMS
+        keep = nms(det_boxes, det_scores)
+        final_boxes = det_boxes[keep]
+        final_scores = det_scores[keep]
         
-        for j, gt_box in enumerate(gt_boxes):
-            if j in matched_gt:
-                continue
-            iou = compute_3d_iu(pred_box, gt_box.reshape(1, -1))
-            if iou > best_iou:
-                best_iou = iou
-                best_gt_idx = j
+        # Match with GT (strictly within the same class)
+        c_gt_mask = gt_boxes[:, 7] == c if len(gt_boxes) > 0 else np.zeros(0, dtype=bool)
+        c_gt_boxes = gt_boxes[c_gt_mask] if len(gt_boxes) > 0 else np.array([])
         
-        if best_iou >= 0.3:  # IoU threshold
-            tp += 1
-            matched_gt.add(best_gt_idx)
-        else:
-            fp += 1
-    
-    fn = num_gt - len(matched_gt)
-    
-    return {
-        'num_pred': num_pred,
-        'num_gt': num_gt,
-        'tp': tp,
-        'fp': fp,
-        'fn': fn,
-        'precision': tp / (tp + fp) if (tp + fp) > 0 else 0,
-        'recall': tp / (tp + fn) if (tp + fn) > 0 else 0,
-    }
+        matched_gt = set()
+        for i, pred_box in enumerate(final_boxes):
+            best_iou = 0
+            best_gt_idx = -1
+            
+            if len(c_gt_boxes) > 0:
+                ious = compute_3d_iu(pred_box, c_gt_boxes)
+                for j, iou in enumerate(ious):
+                    if j in matched_gt:
+                        continue
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_gt_idx = j
+            
+            if best_iou >= 0.3:  # IoU threshold
+                class_results[c]['preds'].append({'score': final_scores[i], 'tp': 1, 'fp': 0})
+                matched_gt.add(best_gt_idx)
+            else:
+                class_results[c]['preds'].append({'score': final_scores[i], 'tp': 0, 'fp': 1})
+                
+    return class_results
 
 
 from models.voxel_generator import VoxelGenerator
@@ -355,9 +341,7 @@ def main():
     # Use a subset for faster evaluation
     num_samples = min(100, len(eval_dataset))
     
-    total_tp = 0
-    total_fp = 0
-    total_fn = 0
+    global_metrics = {c: {'preds': [], 'num_gt': 0} for c in range(3)}
     
     total_time = 0.0
     warmup_steps = min(10, num_samples // 3)  # Warmup for a few steps to let CUDA graphs/allocator settle
@@ -375,7 +359,7 @@ def main():
         start_time = time.perf_counter()
         
         # Evaluate
-        metrics = evaluate_sample(model, points, gt_boxes, device)
+        sample_metrics = evaluate_sample(model, points, gt_boxes, device)
         
         # Sync after everything is done to get accurate time
         if device.type == 'cuda':
@@ -385,17 +369,52 @@ def main():
         if i >= warmup_steps:
             total_time += (end_time - start_time)
             valid_samples += 1
-        
-        total_tp += metrics['tp']
-        total_fp += metrics['fp']
-        total_fn += metrics['fn']
+            
+        for c in range(3):
+            global_metrics[c]['preds'].extend(sample_metrics[c]['preds'])
+            global_metrics[c]['num_gt'] += sample_metrics[c]['num_gt']
         
         if (i + 1) % 10 == 0:
             print(f"Evaluated {i+1}/{num_samples} samples")
+            
+    # Calculate AP and Point Metrics
+    ap_per_class = []
+    t_tp, t_fp, t_fn = 0, 0, 0
     
-    # Compute final metrics
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
+    for c in range(3):
+        preds = global_metrics[c]['preds']
+        num_gt = global_metrics[c]['num_gt']
+        
+        # Calculate AP by sorting predictions by score descending
+        preds.sort(key=lambda x: x['score'], reverse=True)
+        tps = np.array([p['tp'] for p in preds])
+        fps = np.array([p['fp'] for p in preds])
+        
+        acc_tps = np.cumsum(tps)
+        acc_fps = np.cumsum(fps)
+        
+        recalls = acc_tps / num_gt if num_gt > 0 else np.zeros_like(acc_tps)
+        precisions = acc_tps / (acc_tps + acc_fps) if len(acc_tps) > 0 else np.zeros_like(acc_tps)
+        
+        if len(recalls) > 0 and len(precisions) > 0:
+            ap = compute_ap(recalls, precisions)
+            ap_per_class.append(ap)
+            
+        # Point metrics at strictly high threshold (0.70)
+        high_score_preds = [p for p in preds if p['score'] >= 0.70]
+        c_tp = sum(p['tp'] for p in high_score_preds)
+        c_fp = sum(p['fp'] for p in high_score_preds)
+        c_fn = num_gt - c_tp
+        
+        t_tp += c_tp
+        t_fp += c_fp
+        t_fn += c_fn
+
+    mAP = np.mean(ap_per_class) if len(ap_per_class) > 0 else 0.0
+    
+    # Compute final point metrics at 0.70 threshold
+    precision = t_tp / (t_tp + t_fp) if (t_tp + t_fp) > 0 else 0
+    recall = t_tp / (t_tp + t_fn) if (t_tp + t_fn) > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
     
     # Compute speed
@@ -409,14 +428,16 @@ def main():
     print(f"\n{'='*50}")
     print(f"Evaluation Results (Demo)")
     print(f"{'='*50}")
-    print(f"Total TP: {total_tp}")
-    print(f"Total FP: {total_fp}")
-    print(f"Total FN: {total_fn}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F1 Score: {f1:.4f}")
+    print(f"Mean Average Precision (mAP): {mAP:.4f}")
+    print(f"Metrics at Confidence Threshold 0.70:")
+    print(f"  Total TP: {t_tp}")
+    print(f"  Total FP: {t_fp}")
+    print(f"  Total FN: {t_fn}")
+    print(f"  Precision: {precision:.4f}")
+    print(f"  Recall: {recall:.4f}")
+    print(f"  F1 Score: {f1:.4f}")
     print(f"{'-'*50}")
-    print(f"Inference Speed:")
+    print(f"Inference Speed (FP16 Accelerated):")
     print(f"  Avg Latency: {avg_latency_ms:.2f} ms/frame")
     print(f"  FPS:         {fps:.2f} frames/s")
 
