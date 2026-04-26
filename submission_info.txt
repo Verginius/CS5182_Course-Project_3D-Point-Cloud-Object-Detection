@@ -3,6 +3,10 @@
 
 2. Txt files which contain the results for training and evaluation periods.
 - Training metrics and history: `output/training_metrics.csv`
+- Final Training Loss (Epoch 80): 
+    - Total Loss: 0.546172
+    - Heatmap Loss: 0.471537
+    - Regression Loss: 0.746346
 - Evaluation results and metrics: See the section below.
 
 3. Data that are evaluated in your report.
