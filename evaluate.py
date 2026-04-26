@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import torch
 import numpy as np
 from typing import Dict, List, Tuple
@@ -358,14 +359,32 @@ def main():
     total_fp = 0
     total_fn = 0
     
+    total_time = 0.0
+    warmup_steps = min(10, num_samples // 3)  # Warmup for a few steps to let CUDA graphs/allocator settle
+    valid_samples = 0
+    
     for i in range(num_samples):
         # Get sample
         data = eval_dataset[i]
         points = data['points']
         gt_boxes = data['boxes']
         
+        # Sync before starting timer
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
+        start_time = time.perf_counter()
+        
         # Evaluate
         metrics = evaluate_sample(model, points, gt_boxes, device)
+        
+        # Sync after everything is done to get accurate time
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
+        end_time = time.perf_counter()
+        
+        if i >= warmup_steps:
+            total_time += (end_time - start_time)
+            valid_samples += 1
         
         total_tp += metrics['tp']
         total_fp += metrics['fp']
@@ -379,6 +398,14 @@ def main():
     recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
     
+    # Compute speed
+    if valid_samples > 0:
+        avg_latency_ms = (total_time / valid_samples) * 1000.0
+        fps = 1000.0 / avg_latency_ms
+    else:
+        avg_latency_ms = 0.0
+        fps = 0.0
+        
     print(f"\n{'='*50}")
     print(f"Evaluation Results (Demo)")
     print(f"{'='*50}")
@@ -388,6 +415,10 @@ def main():
     print(f"Precision: {precision:.4f}")
     print(f"Recall: {recall:.4f}")
     print(f"F1 Score: {f1:.4f}")
+    print(f"{'-'*50}")
+    print(f"Inference Speed:")
+    print(f"  Avg Latency: {avg_latency_ms:.2f} ms/frame")
+    print(f"  FPS:         {fps:.2f} frames/s")
 
 
 if __name__ == '__main__':
