@@ -16,3 +16,6 @@ scipy
 scikit-learn
 matplotlib
 plyfile
+pandas
+tqdm
+open3d
