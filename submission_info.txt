@@ -1,5 +1,6 @@
 1. A source subdirectory containing all the source files, do not include the platform source code and training dataset.
-- Please refer to the current directory (excluding the `data/` and `output/` dataset folders) for all source code files (.py, .sh, .yml, etc.). The codebase consists of custom Pure PyTorch + spconv 2.x refactored models and pipelines.
+- Please refer to https://github.com/Verginius/CS5182_Course-Project_3D-Point-Cloud-Object-Detection
+
 
 2. Txt files which contain the results for training and evaluation periods.
 - Training metrics and history: `output/training_metrics.csv`
@@ -8,8 +9,6 @@
     - Heatmap Loss: 0.471537
     - Regression Loss: 0.746346
 - Evaluation results and metrics: See the section below.
-
-3. Data that are evaluated in your report.
 ==================================================
 Evaluation Results
 ==================================================
@@ -27,3 +26,7 @@ Inference Speed (FP16 Accelerated):
   Avg Latency: 13.43 ms/frame
   FPS:         74.45 frames/s
 ==================================================
+
+
+3. Data that are evaluated in your report.  
+KITTI velodyne/label_2/calib. We splited the training set with a rate of 80%/20% and use the latter to test our model. 
