@@ -1,0 +1,25 @@
+1. A source subdirectory containing all the source files, do not include the platform source code and training dataset.
+- Please refer to the current directory (excluding the `data/` and `output/` dataset folders) for all source code files (.py, .sh, .yml, etc.). The codebase consists of custom Pure PyTorch + spconv 2.x refactored models and pipelines.
+
+2. Txt files which contain the results for training and evaluation periods.
+- Training metrics and history: `output/training_metrics.csv`
+- Evaluation results and metrics: See the section below.
+
+3. Data that are evaluated in your report.
+==================================================
+Evaluation Results
+==================================================
+Mean Average Precision (mAP): 0.6692
+
+Metrics at Confidence Threshold 0.70:
+  Total TP: 344
+  Total FP: 309
+  Total FN: 213
+  Precision: 0.5268
+  Recall: 0.6176
+  F1 Score: 0.5686
+--------------------------------------------------
+Inference Speed (FP16 Accelerated):
+  Avg Latency: 13.43 ms/frame
+  FPS:         74.45 frames/s
+==================================================
