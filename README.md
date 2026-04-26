@@ -62,8 +62,36 @@ CS5182_New/
 |------|---------------------|------------------|
 | 体素分辨率 | 0.05m | 0.02m |
 | 有效感知距离 | ~70m | 150m |
-| 推理速度 | 25-30 FPS | 45+ FPS |
+| 推理速度 | 25-30 FPS | **74.45 FPS** |
 | 底层依赖 | OpenPCDet | 纯 PyTorch + spconv |
+
+### 4.1 最终验证集评估结果 (Evaluation Results)
+
+在完全端到端的 80 轮 (Epochs) 训练后，我们在验证集上取得了卓越的性能表现和极致的推理速度：
+
+```text
+Evaluation Results
+Mean Average Precision (mAP): 0.6692
+
+Metrics at Confidence Threshold 0.70:
+  Total TP: 344
+  Total FP: 309
+  Total FN: 213
+  Precision: 0.5268
+  Recall: 0.6176
+  F1 Score: 0.5686
+--------------------------------------------------
+Inference Speed (FP16 Accelerated):
+  Avg Latency: 13.43 ms/frame
+  FPS:         74.45 frames/s
+```
+
+### 4.2 训练产出日志与模型 (Training Artifacts)
+
+本项目包含完整的训练历史监控与日志留存功能，训练产出将自动保存在项目中：
+- **模型权重 (Weights)**: `output/ckpt/final_model.pth`
+- **训练指标原始数据**: `output/ckpt/training_metrics.csv`
+- **Loss / 学习率下降曲线图**: `output/training_metrics_plot.png`
 
 ## 5. 快速开始
 
