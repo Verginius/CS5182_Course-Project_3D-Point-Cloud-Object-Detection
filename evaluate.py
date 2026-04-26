@@ -129,9 +129,15 @@ def compute_ap(recalls: np.ndarray, precisions: np.ndarray) -> float:
     return ap
 
 
-def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: torch.device) -> Dict:
-    """Evaluate a single sample and return per-class predictions and GTs"""
-    # Prepare data (simplified)
+def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: torch.device) -> Tuple[Dict, float]:
+    """Evaluate a single sample and return per-class predictions, GTs, and inference time"""
+    
+    # ==== Start Inference Timer ====
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
+
+    # Prepare data (Voxelization on GPU)
     batch_dict = prepare_data([points], device)
     
     # Inference with FP16 for massive acceleration
@@ -144,8 +150,14 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
                 bev_features = torch.randn(1, 640, 250, 469, device=device)
             
             head_preds = model['center_head'](bev_features)
+            
+    # ==== End Inference Timer ====
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
+    end_time = time.perf_counter()
+    inference_time = end_time - start_time
     
-    # Post-processing
+    # Post-processing (Not counted in network inference FPS)
     heatmap_tensor = head_preds['heatmap'][0]  # [C, H, W]
     
     # Apply 3x3 MaxPool to find local maxima (Peak Extraction)
@@ -224,7 +236,7 @@ def evaluate_sample(model, points: np.ndarray, gt_boxes: np.ndarray, device: tor
             else:
                 class_results[c]['preds'].append({'score': final_scores[i], 'tp': 0, 'fp': 1})
                 
-    return class_results
+    return class_results, inference_time
 
 
 from models.voxel_generator import VoxelGenerator
@@ -353,21 +365,11 @@ def main():
         points = data['points']
         gt_boxes = data['boxes']
         
-        # Sync before starting timer
-        if device.type == 'cuda':
-            torch.cuda.synchronize()
-        start_time = time.perf_counter()
-        
         # Evaluate
-        sample_metrics = evaluate_sample(model, points, gt_boxes, device)
-        
-        # Sync after everything is done to get accurate time
-        if device.type == 'cuda':
-            torch.cuda.synchronize()
-        end_time = time.perf_counter()
+        sample_metrics, inference_time = evaluate_sample(model, points, gt_boxes, device)
         
         if i >= warmup_steps:
-            total_time += (end_time - start_time)
+            total_time += inference_time
             valid_samples += 1
             
         for c in range(3):
