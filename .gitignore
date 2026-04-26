@@ -14,12 +14,9 @@ env.bak/
 venv.bak/
 
 # Project specifics
-output/
 data/
 datasets/__pycache__/
 models/__pycache__/
-output/ckpt/
-output/predictions/
 
 # IDEs
 .vscode/
